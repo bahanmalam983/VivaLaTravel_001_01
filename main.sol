@@ -217,3 +217,76 @@ contract VivaLaTravel is ReentrancyGuard, Pausable {
     function sealRoute(uint256 sketchId) external {
         RouteSketch storage s = _sketches[sketchId];
         if (s.mintedBlock == 0) revert VLT_SketchMissing(sketchId);
+        if (s.planner != msg.sender && msg.sender != voyageDirector) revert VLT_NotPlanner(sketchId, msg.sender);
+        if (s.sealed) revert VLT_SketchSealed(sketchId);
+        s.sealed = true;
+        emit VLT_RouteSealed(sketchId);
+    }
+
+    function registerGuide(bytes32 bioHash) external whenNotPaused {
+        if (guides[msg.sender].active) revert VLT_GuideActive(msg.sender);
+        guides[msg.sender] = GuideProfile({
+            wallet: msg.sender,
+            bioHash: bioHash,
+            joinedBlock: block.number,
+            active: true,
+            sessionsHosted: 0
+        });
+        emit VLT_GuideJoined(msg.sender, bioHash);
+    }
+
+    function leaveGuideRoster() external {
+        if (!guides[msg.sender].active) revert VLT_GuideInactive(msg.sender);
+        guides[msg.sender].active = false;
+        emit VLT_GuideLeft(msg.sender);
+    }
+
+    function postReview(bytes32 cardId, uint8 rating, bytes32 noteHash) external whenNotPaused {
+        AdvisoryCard storage c = _cards[cardId];
+        if (c.listedBlock == 0) revert VLT_CardMissing(cardId);
+        if (c.retired) revert VLT_CardRetired(cardId);
+        if (rating < RATING_FLOOR || rating > RATING_CEIL) revert VLT_BadRating(rating);
+        uint256 nxt = _lastReviewBlock[msg.sender] + REVIEW_GAP_BLOCKS;
+        if (block.number < nxt) revert VLT_ReviewGap(nxt);
+        if (_reviewCount[cardId][msg.sender] >= MAX_REVIEWS_PER_ADVISORY) revert VLT_ReviewCap(cardId, msg.sender);
+        _reviewCount[cardId][msg.sender]++;
+        _lastReviewBlock[msg.sender] = block.number;
+        c.reviewTally++;
+        c.ratingSum += rating;
+        emit VLT_ReviewLogged(cardId, msg.sender, rating, noteHash);
+    }
+
+    function openSession(bytes32 cardId, address guide) external payable whenNotPaused nonReentrant returns (uint256 sessionId) {
+        if (guide == address(0)) revert VLT_ZeroAddr();
+        if (!guides[guide].active) revert VLT_GuideInactive(guide);
+        AdvisoryCard storage c = _cards[cardId];
+        if (c.listedBlock == 0) revert VLT_CardMissing(cardId);
+        if (c.retired) revert VLT_CardRetired(cardId);
+        if (_travelerSessionCount[msg.sender] >= MAX_ACTIVE_SESSIONS) revert VLT_TooManySessions(msg.sender);
+        uint256 minDeposit = 0.001 ether;
+        if (msg.value < minDeposit) revert VLT_DepositLow(msg.value, minDeposit);
+        sessionId = _nextSessionId++;
+        _sessions[sessionId] = AdvisorySession({
+            sessionId: sessionId,
+            cardId: cardId,
+            traveler: msg.sender,
+            guide: guide,
+            depositWei: msg.value,
+            openedBlock: block.number,
+            settled: false,
+            cancelled: false
+        });
+        _travelerSessionCount[msg.sender]++;
+        totalSessionsOpened++;
+        emit VLT_SessionOpened(sessionId, cardId, msg.sender, guide, msg.value);
+    }
+
+    function settleSession(uint256 sessionId) external nonReentrant {
+        AdvisorySession storage s = _sessions[sessionId];
+        if (s.openedBlock == 0) revert VLT_SessionMissing(sessionId);
+        if (s.settled) revert VLT_SessionSettled(sessionId);
+        if (s.cancelled) revert VLT_SessionCancelled(sessionId);
+        if (msg.sender != s.guide && msg.sender != voyageDirector) revert VLT_NotSessionParty(sessionId, msg.sender);
+        s.settled = true;
+        _travelerSessionCount[s.traveler]--;
+        guides[s.guide].sessionsHosted++;
