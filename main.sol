@@ -71,3 +71,76 @@ contract VivaLaTravel is ReentrancyGuard, Pausable {
 
     mapping(bytes32 => AdvisoryCard) private _cards;
     bytes32[] private _cardIndex;
+    mapping(uint256 => RouteSketch) private _sketches;
+    uint256 private _nextSketchId;
+    mapping(address => GuideProfile) public guides;
+    mapping(uint256 => AdvisorySession) private _sessions;
+    uint256 private _nextSessionId;
+    mapping(bytes32 => mapping(address => uint256)) private _reviewCount;
+    mapping(address => uint256) private _lastReviewBlock;
+    mapping(address => uint256) private _travelerSessionCount;
+
+    address public voyageDirector;
+    address public pendingDirector;
+    address public compassCouncil;
+    address public routingClerk;
+    uint256 public seasonEpoch;
+    uint256 public treasuryBalance;
+    uint256 public totalTipsWei;
+    uint256 public totalSessionsOpened;
+
+    error VLT_NotDirector(address who);
+    error VLT_NotCouncil(address who);
+    error VLT_NotClerk(address who);
+    error VLT_NotPendingDirector(address who);
+    error VLT_ZeroAddr();
+    error VLT_CardExists(bytes32 id);
+    error VLT_CardMissing(bytes32 id);
+    error VLT_CardRetired(bytes32 id);
+    error VLT_BadClimate(uint8 band);
+    error VLT_BadRating(uint8 score);
+    error VLT_ReviewGap(uint256 nextBlock);
+    error VLT_ReviewCap(bytes32 id, address traveler);
+    error VLT_SketchEmpty();
+    error VLT_SketchTooLong(uint256 len);
+    error VLT_SketchDays(uint256 days);
+    error VLT_SketchMissing(uint256 id);
+    error VLT_NotPlanner(uint256 id, address who);
+    error VLT_SketchSealed(uint256 id);
+    error VLT_GuideActive(address g);
+    error VLT_GuideInactive(address g);
+    error VLT_SessionMissing(uint256 id);
+    error VLT_SessionSettled(uint256 id);
+    error VLT_SessionCancelled(uint256 id);
+    error VLT_NotSessionParty(uint256 id, address who);
+    error VLT_DepositLow(uint256 got, uint256 need);
+    error VLT_ArrayMismatch();
+    error VLT_BatchOver();
+    error VLT_CapReached();
+    error VLT_WithdrawFail();
+    error VLT_DirectEth();
+    error VLT_TooManySessions(address traveler);
+
+    event VLT_AdvisoryListed(bytes32 indexed cardId, uint8 climateBand, bytes32 headlineHash, address indexed curator);
+    event VLT_AdvisoryRetired(bytes32 indexed cardId, uint256 blockNum);
+    event VLT_RouteMinted(uint256 indexed sketchId, address indexed planner, uint256 daySpan);
+    event VLT_RouteSealed(uint256 indexed sketchId);
+    event VLT_ReviewLogged(bytes32 indexed cardId, address indexed traveler, uint8 rating, bytes32 noteHash);
+    event VLT_GuideJoined(address indexed guide, bytes32 bioHash);
+    event VLT_GuideLeft(address indexed guide);
+    event VLT_SessionOpened(uint256 indexed sessionId, bytes32 cardId, address traveler, address guide, uint256 deposit);
+    event VLT_SessionSettled(uint256 indexed sessionId, uint256 payout, uint256 fee);
+    event VLT_SessionCancelled(uint256 indexed sessionId);
+    event VLT_TipRelayed(address indexed fromAddr, address indexed guide, uint256 gross, uint256 fee);
+    event VLT_SeasonShifted(uint256 oldEpoch, uint256 newEpoch);
+    event VLT_DirectorHandoff(address indexed prev, address indexed next);
+    event VLT_CouncilRotated(address indexed prev, address indexed next);
+    event VLT_TreasuryPulled(address indexed to, uint256 amount);
+
+    modifier onlyDirector() {
+        if (msg.sender != voyageDirector) revert VLT_NotDirector(msg.sender);
+        _;
+    }
+
+    modifier onlyCouncil() {
+        if (msg.sender != compassCouncil) revert VLT_NotCouncil(msg.sender);
