@@ -363,3 +363,76 @@ contract VivaLaTravel is ReentrancyGuard, Pausable {
     function councilUnpause() external onlyCouncil { _unpause(); }
 
     function batchListAdvisories(
+        bytes32[] calldata cardIds,
+        uint8[] calldata bands,
+        bytes32[] calldata hashes
+    ) external onlyDirector whenNotPaused {
+        if (cardIds.length != bands.length || cardIds.length != hashes.length) revert VLT_ArrayMismatch();
+        if (cardIds.length > BATCH_CAP) revert VLT_BatchOver();
+        for (uint256 i = 0; i < cardIds.length; ++i) {
+            bytes32 cid = cardIds[i];
+            uint8 band = bands[i];
+            bytes32 hsh = hashes[i];
+            if (cid == bytes32(0)) revert VLT_ZeroAddr();
+            if (band == 0 || band > 12) revert VLT_BadClimate(band);
+            if (_cards[cid].listedBlock != 0) revert VLT_CardExists(cid);
+            if (_cardIndex.length >= MAX_ADVISORIES) revert VLT_CapReached();
+            _cards[cid] = AdvisoryCard({
+                cardId: cid, climateBand: band, headlineHash: hsh,
+                listedBlock: block.number, retired: false, reviewTally: 0, ratingSum: 0
+            });
+            _cardIndex.push(cid);
+            emit VLT_AdvisoryListed(cid, band, hsh, msg.sender);
+        }
+    }
+
+    function probeCardStats_0(bytes32 cardId) external view returns (uint256 listed, uint256 tally, uint256 avgRating, bool retired) {
+        AdvisoryCard storage c = _cards[cardId];
+        listed = c.listedBlock;
+        tally = c.reviewTally;
+        retired = c.retired;
+        avgRating = tally == 0 ? 0 : c.ratingSum / tally;
+    }
+
+    function probeSketchMeta_0(uint256 sketchId) external view returns (address planner, uint256 daySpan, bool sealed, uint256 stopCount) {
+        RouteSketch storage s = _sketches[sketchId];
+        planner = s.planner;
+        daySpan = s.daySpan;
+        sealed = s.sealed;
+        stopCount = s.stopIds.length;
+    }
+
+    function probeSessionLane_0(uint256 sessionId) external view returns (address traveler, address guide, uint256 deposit, bool settled, bool cancelled) {
+        AdvisorySession storage s = _sessions[sessionId];
+        traveler = s.traveler;
+        guide = s.guide;
+        deposit = s.depositWei;
+        settled = s.settled;
+        cancelled = s.cancelled;
+    }
+
+    function anchorEcho_0() external view returns (address a, address b, address c) {
+        a = ADDRESS_A; b = ADDRESS_B; c = ADDRESS_C;
+    }
+
+    function probeCardStats_1(bytes32 cardId) external view returns (uint256 listed, uint256 tally, uint256 avgRating, bool retired) {
+        AdvisoryCard storage c = _cards[cardId];
+        listed = c.listedBlock;
+        tally = c.reviewTally;
+        retired = c.retired;
+        avgRating = tally == 0 ? 0 : c.ratingSum / tally;
+    }
+
+    function probeSketchMeta_1(uint256 sketchId) external view returns (address planner, uint256 daySpan, bool sealed, uint256 stopCount) {
+        RouteSketch storage s = _sketches[sketchId];
+        planner = s.planner;
+        daySpan = s.daySpan;
+        sealed = s.sealed;
+        stopCount = s.stopIds.length;
+    }
+
+    function probeSessionLane_1(uint256 sessionId) external view returns (address traveler, address guide, uint256 deposit, bool settled, bool cancelled) {
+        AdvisorySession storage s = _sessions[sessionId];
+        traveler = s.traveler;
+        guide = s.guide;
+        deposit = s.depositWei;
