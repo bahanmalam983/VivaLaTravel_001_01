@@ -290,3 +290,76 @@ contract VivaLaTravel is ReentrancyGuard, Pausable {
         s.settled = true;
         _travelerSessionCount[s.traveler]--;
         guides[s.guide].sessionsHosted++;
+        uint256 fee = (s.depositWei * SESSION_FEE_BP) / 10_000;
+        uint256 payout = s.depositWei - fee;
+        treasuryBalance += fee;
+        (bool ok, ) = s.guide.call{value: payout}("");
+        if (!ok) revert VLT_WithdrawFail();
+        emit VLT_SessionSettled(sessionId, payout, fee);
+    }
+
+    function cancelSession(uint256 sessionId) external nonReentrant {
+        AdvisorySession storage s = _sessions[sessionId];
+        if (s.openedBlock == 0) revert VLT_SessionMissing(sessionId);
+        if (s.settled) revert VLT_SessionSettled(sessionId);
+        if (s.cancelled) revert VLT_SessionCancelled(sessionId);
+        if (msg.sender != s.traveler && msg.sender != voyageDirector) revert VLT_NotSessionParty(sessionId, msg.sender);
+        s.cancelled = true;
+        _travelerSessionCount[s.traveler]--;
+        uint256 refund = s.depositWei;
+        (bool ok, ) = s.traveler.call{value: refund}("");
+        if (!ok) revert VLT_WithdrawFail();
+        emit VLT_SessionCancelled(sessionId);
+    }
+
+    function tipGuide(address guide) external payable whenNotPaused nonReentrant {
+        if (!guides[guide].active) revert VLT_GuideInactive(guide);
+        if (msg.value == 0) revert VLT_DepositLow(0, 1);
+        uint256 fee = (msg.value * SESSION_FEE_BP) / 10_000;
+        uint256 net = msg.value - fee;
+        treasuryBalance += fee;
+        totalTipsWei += msg.value;
+        (bool ok, ) = guide.call{value: net}("");
+        if (!ok) revert VLT_WithdrawFail();
+        emit VLT_TipRelayed(msg.sender, guide, msg.value, fee);
+    }
+
+    function pullTreasury(address to, uint256 amount) external onlyDirector nonReentrant {
+        if (to == address(0)) revert VLT_ZeroAddr();
+        if (amount > treasuryBalance) revert VLT_DepositLow(treasuryBalance, amount);
+        treasuryBalance -= amount;
+        (bool ok, ) = to.call{value: amount}("");
+        if (!ok) revert VLT_WithdrawFail();
+        emit VLT_TreasuryPulled(to, amount);
+    }
+
+    function beginDirectorTransfer(address nextDirector) external onlyDirector {
+        if (nextDirector == address(0)) revert VLT_ZeroAddr();
+        pendingDirector = nextDirector;
+    }
+
+    function acceptDirectorRole() external {
+        if (msg.sender != pendingDirector) revert VLT_NotPendingDirector(msg.sender);
+        address prev = voyageDirector;
+        voyageDirector = pendingDirector;
+        pendingDirector = address(0);
+        emit VLT_DirectorHandoff(prev, voyageDirector);
+    }
+
+    function rotateCouncil(address nextCouncil) external onlyDirector {
+        if (nextCouncil == address(0)) revert VLT_ZeroAddr();
+        address prev = compassCouncil;
+        compassCouncil = nextCouncil;
+        emit VLT_CouncilRotated(prev, nextCouncil);
+    }
+
+    function bumpSeason() external onlyCouncil {
+        uint256 prev = seasonEpoch;
+        seasonEpoch = prev + 1;
+        emit VLT_SeasonShifted(prev, seasonEpoch);
+    }
+
+    function councilPause() external onlyCouncil { _pause(); }
+    function councilUnpause() external onlyCouncil { _unpause(); }
+
+    function batchListAdvisories(
