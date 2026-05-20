@@ -144,3 +144,76 @@ contract VivaLaTravel is ReentrancyGuard, Pausable {
 
     modifier onlyCouncil() {
         if (msg.sender != compassCouncil) revert VLT_NotCouncil(msg.sender);
+        _;
+    }
+
+    modifier onlyClerk() {
+        if (msg.sender != routingClerk) revert VLT_NotClerk(msg.sender);
+        _;
+    }
+
+    constructor() {
+        voyageDirector = msg.sender;
+        compassCouncil = msg.sender;
+        routingClerk = msg.sender;
+        seasonEpoch = 1;
+        _nextSketchId = 1;
+        _nextSessionId = 1;
+    }
+
+    receive() external payable {
+        revert VLT_DirectEth();
+    }
+
+    fallback() external payable {
+        revert VLT_DirectEth();
+    }
+
+    function listAdvisory(bytes32 cardId, uint8 climateBand, bytes32 headlineHash) external onlyDirector whenNotPaused {
+        if (cardId == bytes32(0)) revert VLT_ZeroAddr();
+        if (climateBand == 0 || climateBand > 12) revert VLT_BadClimate(climateBand);
+        if (_cards[cardId].listedBlock != 0) revert VLT_CardExists(cardId);
+        if (_cardIndex.length >= MAX_ADVISORIES) revert VLT_CapReached();
+        _cards[cardId] = AdvisoryCard({
+            cardId: cardId,
+            climateBand: climateBand,
+            headlineHash: headlineHash,
+            listedBlock: block.number,
+            retired: false,
+            reviewTally: 0,
+            ratingSum: 0
+        });
+        _cardIndex.push(cardId);
+        emit VLT_AdvisoryListed(cardId, climateBand, headlineHash, msg.sender);
+    }
+
+    function retireAdvisory(bytes32 cardId) external onlyCouncil {
+        AdvisoryCard storage c = _cards[cardId];
+        if (c.listedBlock == 0) revert VLT_CardMissing(cardId);
+        if (c.retired) revert VLT_CardRetired(cardId);
+        c.retired = true;
+        emit VLT_AdvisoryRetired(cardId, block.number);
+    }
+
+    function mintRoute(bytes32[] calldata stopIds, uint256 daySpan) external whenNotPaused returns (uint256 sketchId) {
+        if (stopIds.length == 0) revert VLT_SketchEmpty();
+        if (stopIds.length > MAX_ROUTE_STOPS) revert VLT_SketchTooLong(stopIds.length);
+        if (daySpan < MIN_ROUTE_DAYS || daySpan > MAX_ROUTE_DAYS) revert VLT_SketchDays(daySpan);
+        for (uint256 i = 0; i < stopIds.length; ++i) {
+            if (_cards[stopIds[i]].listedBlock == 0) revert VLT_CardMissing(stopIds[i]);
+        }
+        sketchId = _nextSketchId++;
+        RouteSketch storage s = _sketches[sketchId];
+        s.sketchId = sketchId;
+        s.daySpan = daySpan;
+        s.planner = msg.sender;
+        s.mintedBlock = block.number;
+        for (uint256 j = 0; j < stopIds.length; ++j) {
+            s.stopIds.push(stopIds[j]);
+        }
+        emit VLT_RouteMinted(sketchId, msg.sender, daySpan);
+    }
+
+    function sealRoute(uint256 sketchId) external {
+        RouteSketch storage s = _sketches[sketchId];
+        if (s.mintedBlock == 0) revert VLT_SketchMissing(sketchId);
